@@ -1,0 +1,53 @@
+
+
+#To use Poetry for building and managing your package:
+#Install Poetry:
+#	pip install poetry
+#
+#Initialize Poetry in your project (this will update your pyproject.toml):
+#	poetry init
+#or if you already have pyproject.toml, just run:
+#	poetry install
+#Build your package:
+#	poetry build
+#Poetry will read all metadata from your pyproject.toml and create distribution files in the dist directory.
+
+#***** SEQUENCE OF COMMANDS TO RUN *************
+# step 1
+#After making changes to pyproject.toml, run these commands in sequence:
+#Update the lock file:
+# #####poetry lock
+
+# step 2
+#Install dependencies and create/update the virtual environment:
+# #####poetry install
+# step 3
+#Build the package:
+# #####poetry build
+#***********************************************
+
+
+
+
+[project]
+name = "mqtt-connector-lib"
+version = "0.0.1"
+description = "mqtt con, disconn, sub, pub"
+authors = [
+    {name = "harikrishna2005@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gmqtt==0.7.0"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+packages = [
+    { include = "mqtt_connector_lib", from = "src" }
+]

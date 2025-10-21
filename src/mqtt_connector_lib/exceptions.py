@@ -51,3 +51,23 @@ class MyMqttPublisherError(MyMqttBaseError):
 class MyMqttSubscriberError(MyMqttBaseError):
     """Raised when the connection fails."""
     pass
+
+
+class HandlerRegistryError(MyMqttBaseError):
+    """Base exception for handler registry operations"""
+    def __init__(self, message="Handler registry operation failed", reason_code=None, **kwargs):
+        self.message = message
+        self.reason_code = reason_code
+        self.details = kwargs
+        super().__init__(message, reason_code, **kwargs)
+
+class HandlerNotFoundError(HandlerRegistryError):
+    """Raised when a requested handler is not found"""
+    def __init__(self, message="Handler not found", reason_code="handler_not_found", **kwargs):
+        super().__init__(message, reason_code, **kwargs)
+
+
+class InvalidHandlerError(HandlerRegistryError):
+    """Raised when an invalid handler is provided"""
+    def __init__(self, message="Invalid handler provided", reason_code="invalid_handler", **kwargs):
+        super().__init__(message, reason_code, **kwargs)

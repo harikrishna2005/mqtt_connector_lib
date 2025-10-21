@@ -1,10 +1,13 @@
+import pytest_asyncio
+import pytest
+import logging
+
 import asyncio
 import socket
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest_asyncio
-import pytest
-from gmqtt import MQTTConnectError
+
+# from gmqtt import MQTTConnectError
 
 from mqtt_connector_lib.gmqtt_connector import BrokerClient, GMqttConnector
 from mqtt_connector_lib.exceptions import MyMqttConnectionError, MyMqttBaseError

@@ -10,8 +10,6 @@ import logging
 from mqtt_connector_lib import constants
 
 
-
-# HandlerFunc: TypeAlias = Callable[[str, str], Awaitable[None]]
 adapter_context = {'prefix': '[MQTT CONNECTOR]'}
 # logger = logging.LoggerAdapter(logging.getLogger(constants.SERVICE_NAME), adapter_context)
 logger = logging.getLogger(constants.SERVICE_NAME)

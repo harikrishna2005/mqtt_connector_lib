@@ -56,17 +56,17 @@ live_mosquitto_broker = BrokerClient(
 
 aws_broker = BrokerClient(
     # host="test.mosquitto.org",
-    host="13.126.108.152",
+    host="13.127.243.114",
     port=1883,
     client_id="test_client_12345",
     user_name="mqtt_user",
     # user_name="hahahahaha_user",
     # password="My_mqtt_password629@?")
-    password="zzzzzzzzzzzzzz_mqtt_password629@?")
+    password="My_mqtt_password629@?")
 
 
-test_client = live_mosquitto_broker
-# test_client = aws_broker
+# test_client = live_mosquitto_broker
+test_client = aws_broker
 
 # connector = MqttClient(broker_details=test_client)
 
@@ -86,7 +86,7 @@ async def main():
 
 
     # mqtt_client_connector.connect()
-    await asyncio.sleep(20)
+    await asyncio.sleep(320)
     print("MQTT client connected.")
 
 

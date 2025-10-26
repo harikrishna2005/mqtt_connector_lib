@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # from gmqtt import MQTTConnectError
 
 from mqtt_connector_lib.gmqtt_connector import BrokerClient, GMqttConnector
-from mqtt_connector_lib.exceptions import MyMqttConnectionError, MyMqttBaseError
+from mqtt_connector_lib.exceptions import MyMqttConnectionError,MyMqttSubscriptionError, MyMqttBaseError
 
 
 
@@ -182,3 +182,144 @@ async def test_INTEGRATION_Already_disconnected():
     await mqtt_client_connector.disconnectAsync()
     await mqtt_client_connector.disconnectAsync()
     assert mqtt_client_connector._connected.is_set() is False
+
+
+
+
+class TestSubscription:
+
+    @pytest_asyncio.fixture
+    async def mock_connected_connector(self):
+        broker_details = BrokerClient(
+            host="localhost",
+            port=1883,
+            # host="XXX.mosquitto.org",
+            # port=1999,
+            client_id="test_client_12345")
+
+        with patch('mqtt_connector_lib.gmqtt_connector.GMqttClient') as MockClient:
+            instance = MockClient.return_value
+            instance.subscribe = MagicMock()
+            instance.unsubscribe = MagicMock()
+
+            conn = GMqttConnector(broker_details=broker_details, clean_session=True)
+            conn.client = instance
+            conn._connected.set()  # Mark as connected
+            yield conn
+
+    @pytest_asyncio.fixture
+    async def real_connected_connector(self):
+        broker_details = BrokerClient(
+            host="test.mosquitto.org",
+            port=1883,
+            # host="XXX.mosquitto.org",
+            # port=1999,
+            client_id="test_client_12345")
+
+        # with patch('mqtt_connector_lib.gmqtt_connector.GMqttClient') as MockClient:
+        #     instance = MockClient.return_value
+        #     instance.subscribe = AsyncMock()
+        #     instance.unsubscribe = AsyncMock()
+        #
+        #     conn = GMqttConnector(broker_details=broker_details, clean_session=True)
+        #     conn.client = instance
+        #     conn._connected.set()  # Mark as connected
+        #     yield conn
+        conn = GMqttConnector(broker_details=broker_details, clean_session=True)
+        await conn.connectAsync(username=broker_details.user_name, password=broker_details.password)
+        #     conn.client = instance
+        #     conn._connected.set()  # Mark as connected
+        yield conn
+        await conn.disconnectAsync()
+
+    # @pytest.mark.asyncio
+    # async def test_subscribe_async_success(self, mock_connected_connector):
+    #     """
+    #     Tests the success scenario for subscribeAsync using a mocked client.
+    #     """
+    #     # Arrange
+    #     connector = mock_connected_connector
+    #     mock_gmqtt_client = connector.client
+    #     test_mid = 1
+    #     test_topic = "test/success"
+    #     test_qos = 1
+    #
+    #     # Configure the mock to return a specific message ID
+    #     mock_gmqtt_client.subscribe.return_value = test_mid
+    #
+    #     async def dummy_message_handler(topic, payload):
+    #         pass
+    #
+    #     try:
+    #         # Act
+    #         # Start the subscribe task but don't wait for it to complete yet.
+    #         # It will block waiting for the _on_subscribe event.
+    #         subscribe_task = asyncio.create_task(
+    #             connector.subscribeAsync(
+    #                 topic=test_topic,
+    #                 handler=dummy_message_handler,
+    #                 qos=test_qos
+    #             )
+    #         )
+    #
+    #         # Give the task a moment to run and add the mid to _pending_subscriptions
+    #         await asyncio.sleep(0.01)
+    #
+    #         # Now, simulate the broker sending a SUBACK by calling the callback.
+    #         # This will set the event that the subscribe_task is waiting for.
+    #         granted_qos = [test_qos]
+    #         connector._on_subscribe(mock_gmqtt_client, test_mid, granted_qos, {})
+    #
+    #         # Await the task to ensure it completes without errors.
+    #         await subscribe_task
+    #
+    #         # Assert
+    #         # Verify that the underlying client's subscribe method was called correctly.
+    #         # mock_gmqtt_client.subscribe.assert_called_once_with(test_topic, qos=test_qos)
+    #         mock_gmqtt_client.subscribe.assert_called_once_with(test_topic, test_qos)
+    #         # If we reached here without a timeout or other exception, the test is successful.
+    #         assert True
+    #
+    #     except MyMqttSubscriptionError as e:
+    #         pytest.fail(f"subscribeAsync raised an unexpected exception on success: {e}")
+
+    @pytest.mark.asyncio
+    async def test_INTEGRATION_subscribe_success_path_is_executed(self, real_connected_connector, caplog):
+        """
+        Verifies that the success logic inside _on_subscribe is executed
+        by checking for the specific log message.
+        """
+        # Arrange
+        connector = real_connected_connector
+        test_topic = "test/success/path"
+        test_qos = 1
+
+        async def dummy_handler(topic, payload):
+            pass
+
+        # Act
+        # Set the log level to INFO to capture the desired message
+        with caplog.at_level(logging.INFO):
+            await connector.subscribeAsync(
+                topic=test_topic,
+                handler=dummy_handler,
+                qos=test_qos
+            )
+            await asyncio.sleep(1)
+
+        # Assert
+        # Check if the expected success message is present in the captured logs.
+        assert "subscription SUCCESS for (mid=" in caplog.text
+
+        # Optional: Clean up the subscription
+        # await connector.unsubscribeAsync([test_topic])
+
+    @pytest.mark.asyncio
+    async def test_INTEGRATION_subscribe_without_handler(self, real_connected_connector):
+        with pytest.raises(MyMqttSubscriptionError, match="No Handler provided during subscription") as exc_info:
+            await real_connected_connector.subscribeAsync(
+                topic="test/topic",
+                handler=None,
+                qos=1
+            )
+

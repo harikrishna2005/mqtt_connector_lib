@@ -1,22 +1,21 @@
-
-
+from typing import Callable, Awaitable
 import asyncio
-from gmqtt import Client as GMqttClient, MQTTConnectError
 import socket
+from gmqtt import Client as GMqttClient, MQTTConnectError
 
-from mqtt_connector_lib.exceptions import MyMqttBaseError, MyMqttConnectionError
+from mqtt_connector_lib.exceptions import MyMqttBaseError, MyMqttConnectionError, MyMqttSubscriptionError
 
 import logging
 from mqtt_connector_lib import constants
 
-
-adapter_context = {'prefix': '[MQTT CONNECTOR]'}
+adapter_context = {'prefix': constants.GMQTT_CONNECTOR_PREFIX}
 # logger = logging.LoggerAdapter(logging.getLogger(constants.SERVICE_NAME), adapter_context)
 logger = logging.getLogger(constants.SERVICE_NAME)
 logger = logging.LoggerAdapter(logger, adapter_context)
 
+
 class BrokerClient:
-    def __init__(self,client_id, host, port, user_name=None, password=None):
+    def __init__(self, client_id, host, port, user_name=None, password=None):
         self.client_id = client_id
         self.host = host
         self.port = port
@@ -25,15 +24,24 @@ class BrokerClient:
 
 
 class GMqttConnector:
+    """
+    Exceptions raised
+    -----------------
+    - MyMqttConnectionError: For connection related issues
+    - MyMqttSubscriptionError: For subscription related issues including missing handlers
+    - MyMqttBaseError: For other general MQTT errors
+
+
+    """
+
     def __init__(self, broker_details: BrokerClient,
-                    clean_session=True
+                 clean_session=True
                  ):
         self.client_id = broker_details.client_id
         self.host = broker_details.host
         self.port = broker_details.port
         self.clean_session = clean_session
         self.client = GMqttClient(self.client_id, clean_session=clean_session)
-
 
         # State Management
         self._connected = asyncio.Event()
@@ -42,14 +50,16 @@ class GMqttConnector:
         # Assign gmqtt callbacks
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
+        self.client.on_subscribe = self._on_subscribe
+
+        # #local variable used
+        # self._pending_subscriptions = {}  # store mapping between mid -> topic names
 
         # # Logger -  Create a LoggerAdapter to add the prefix
         # adapter_context = {'prefix': '[MQTT CONNECTOR]'}
         # self.logger1 = logging.LoggerAdapter(logger, adapter_context)
 
-
         logger.info(f"MQTT Client Initialied: {self.client_id}")
-
 
     async def connectAsync(self, username=None, password=None):
         #	| Scenario                               | Exception to Catch       |
@@ -74,7 +84,10 @@ class GMqttConnector:
         try:
             logger.info(f"Waiting for broker to connect.....  ")
             await self.client.connect(host=self.host, port=self.port, keepalive=60)
+            # logger.info(f"Below self.client.connect and going to wait for connected wait event ")
             await asyncio.wait_for(self._connected.wait(), timeout=30)
+            # logger.info(f"after asyncio wait for connected event     ")
+
 
         except socket.gaierror as se:
 
@@ -222,13 +235,13 @@ class GMqttConnector:
                 return
             await self.client.disconnect()
             logger.info("Successfully disconnected from broker")
+        except ConnectionError as ce:
+            # Connection already closed/broken
+            logger.warning(f"Connection was already closed: {ce}")
         except OSError as ose:
             # Network unreachable, connection lost
             logger.warning(f"Network error during disconnect: {ose}")
             # self._connected.clear()  # Force clear state
-        except ConnectionError as ce:
-            # Connection already closed/broken
-            logger.warning(f"Connection was already closed: {ce}")
         except socket.error as se:
             # Socket-level errors
             logger.warning(f"Socket error during disconnect: {se}")
@@ -238,13 +251,14 @@ class GMqttConnector:
 
         # logger.info("Disconnecting to broker")
 
-
-
-
     def _on_connect(self, client, flags, rc, properties):
         self._connected.set()
+        extra_details = {"Additional_details ": {
+            "Session already present ": True if flags else False,
+            "Protocol version": self.client.protocol_version
+        }}
 
-        logger.info(f"Connected/Re-connected to broker {self.host}:{self.port} (rc={rc})")
+        logger.info(f"Connected/Re-connected to broker {self.host}:{self.port} (rc={rc}) ==> {extra_details}")
 
         # First time load-> load from persistence to in-memory
         # if self._first_time_load :
@@ -271,14 +285,11 @@ class GMqttConnector:
         #
         #
 
-
         # Resubscribe topics all from in-memory
         # code it
 
         # Retry pending publishes from in-memory
         # code it
-
-
 
     def _on_disconnect(self, client, packet, exc=None):
         self._connected.clear()
@@ -286,3 +297,67 @@ class GMqttConnector:
             logger.warning(f"Disconnected unexpectedly: {exc}")
         else:
             logger.info("Disconnected cleanly")
+
+    def _on_subscribe(self, client, mid, granted_qos, properties):
+        """
+        Called when the broker acknowledges a subscription request.
+        'granted_qos' is a list of integers (the return codes).
+        """
+        # Retrieve the topic associated with this mid
+        # topic = self._pending_subscriptions.pop(mid, None)
+        # topic_details = self._pending_subscriptions.pop(mid, None)
+        logger.info(f"Subscription Acknowledged. Message ID: {mid}  Granted QoS levels :  {granted_qos}")
+        for qos_code in granted_qos:
+            if  qos_code < 128: # 0, 1, 2 are success codes
+                logger.info(f"subscription SUCCESS for (mid={mid}  ")
+                # store the subscription details in persistence store if needed
+
+
+            else:
+                logger.error(f"subscription Failed for (mid={mid} ")
+
+                # (mid={mid}  topic = {topic} qos={qos} handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)} ).
+
+
+
+
+
+
+    async def subscribeAsync(self, topic: str, handler: Callable[[str, str], Awaitable[None]], qos: int = 0):
+
+        # If broker is down, log a warning and return without subscribing
+        if not self._connected.is_set():
+            logger.warning(
+                f"The MQTT broker is down.  The topic : {topic} with qos : {qos} handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)} will be re-subscribed when broker is back")
+
+
+        error_details = {
+            "MQTT_SUBSCRIPTION_ERROR_DETAILS": {
+                "host": self.host,
+                "port": self.port,
+                "client_id": self.client_id,
+                "topic": topic,
+                "qos": qos,
+            }
+        }
+        if handler is None:
+            error_details["MQTT_SUBSCRIPTION_ERROR_DETAILS"]["handler_provided"] = False
+            error_details["MQTT_SUBSCRIPTION_ERROR_DETAILS"][
+                "How_to_fix"] = "Pass the handler parameter with a valid callable function"
+            handler_exception = MyMqttSubscriptionError(message="No Handler provided during subscription",
+                                                        reason_code=None,
+                                                        **error_details)
+            logger.error(f"No Handler provided during subscription to topic '{topic}' ==> {handler_exception}")
+            raise handler_exception
+
+
+
+
+        mid = self.client.subscribe(topic, qos)
+        # Store the topic names against the mid for later lookup in the _on_subscribe callback
+        # self._pending_subscriptions[mid] = {"topic" : topic, "handler": handler.__name__ if hasattr(handler, '__name__') else str(handler), "qos": qos}
+
+        # logger.info(f"Subscribed to topic '{topic}' with qos={qos} and handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)}")
+        logger.info(f"Subscription request sent (mid={mid}  topic = {topic} qos={qos} handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)} ). Waiting for SUBACK...")
+
+

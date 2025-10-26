@@ -36,7 +36,8 @@ def setup_logging():
     file_formatter = logging.Formatter(
         # "%(asctime)s %(levelname)s trace_id=%(trace_id)s span_id=%(span_id)s %(name)s [%(funcName)s:%(lineno)d]: %(message)s"
         # "%(levelname)-8s %(asctime)s T%(trace_id)-20s S%(span_id)-20s %(name)-50s : %(message)s [%(funcName)s:%(lineno)d]"
-        "%(levelname)-8s %(asctime)s T%(trace_id)-20s S%(span_id)-20s %(name)-50s :%(prefix)s  %(message)-150s [%(funcName)s:%(lineno)d]"
+        # "%(levelname)-8s %(asctime)s T%(trace_id)-20s S%(span_id)-20s %(name)-50s :%(prefix)s  %(message)-150s {%(funcName)s:%(lineno)d}"
+        "%(levelname)-8s %(asctime)s T%(trace_id)-20s S%(span_id)-20s %(name)-50s {%(funcName)-30s:%(lineno)-4d}  :%(prefix)s  %(message)-150s"
     )
 
     stream_handler = logging.StreamHandler()
@@ -44,7 +45,8 @@ def setup_logging():
     stream_handler.addFilter(ContextFilter())  # Ensure filter is on the handler
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    # root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG)
     root_logger.handlers.clear()
     root_logger.addHandler(stream_handler)
 

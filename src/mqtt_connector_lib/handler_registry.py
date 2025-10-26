@@ -10,7 +10,7 @@ import logging
 from mqtt_connector_lib import constants
 
 
-adapter_context = {'prefix': '[HANDLER REGISTRY]'}
+adapter_context = {'prefix': constants.HANDLER_REGISTRY_PREFIX}
 # logger = logging.LoggerAdapter(logging.getLogger(constants.SERVICE_NAME), adapter_context)
 logger = logging.getLogger(constants.SERVICE_NAME)
 logger = logging.LoggerAdapter(logger, adapter_context)

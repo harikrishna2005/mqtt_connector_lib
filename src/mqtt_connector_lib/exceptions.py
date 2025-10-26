@@ -48,9 +48,13 @@ class MyMqttPublisherError(MyMqttBaseError):
     """Raised when the connection fails."""
     pass
 
-class MyMqttSubscriberError(MyMqttBaseError):
+class MyMqttSubscriptionError(MyMqttBaseError):
     """Raised when the connection fails."""
-    pass
+    def __init__(self, message="Failed to subscribe", reason_code=None, **kwargs):
+        self.message = message
+        self.reason_code = reason_code
+        self.details = kwargs
+        super().__init__(message, reason_code, **kwargs)
 
 
 class HandlerRegistryError(MyMqttBaseError):

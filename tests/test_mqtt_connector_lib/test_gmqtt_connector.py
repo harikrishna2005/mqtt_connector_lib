@@ -314,6 +314,67 @@ class TestSubscription:
         # Optional: Clean up the subscription
         # await connector.unsubscribeAsync([test_topic])
 
+    @staticmethod
+    async def dummy_handler_one(topic, payload):
+        pass
+
+    @staticmethod
+    async def dummy_handler_two(topic, payload):
+        pass
+
+    @pytest.mark.parametrize(
+        "test_topic,test_qos, my_test_handler",
+        [
+            ("integration/test/handler_one",0, dummy_handler_one),
+            ("integration/test/handler_two",1, dummy_handler_two),
+            ("another/topic/path",2, dummy_handler_one),  # Example of re-using a handler
+            ("integration/test/handler_one",0, dummy_handler_two),  # updating the same topic with different handler
+        ]
+    )
+    @pytest.mark.asyncio
+    async def test_INTEGRATON_subscribe_stores_in_memory_topics_with_handlers(self, real_connected_connector, test_topic, test_qos,my_test_handler):
+        """
+        Verifies that after a successful subscription, the topic and its handler
+        are correctly stored in the _topic_handlers dictionary.
+        """
+        # Arrange
+        connector = real_connected_connector
+        # test_topic = "integration/test/handler"
+        test_qos = 1
+        on_subscribe_completed = asyncio.Event()
+
+        # async def my_test_handler(topic, payload):
+        #     pass
+
+        # Patch the 'on_subscribe' callback on the actual gmqtt client instance
+        original_on_subscribe = connector.client.on_subscribe
+
+        def side_effect_on_subscribe(*args, **kwargs):
+            # Call the original callback logic
+            original_on_subscribe(*args, **kwargs)
+            # Signal that the callback has completed
+            on_subscribe_completed.set()
+
+        # Replace the callback on the client, not just the method on the connector
+        connector.client.on_subscribe = side_effect_on_subscribe
+
+        # Act
+        # Call subscribeAsync to initiate the subscription process.
+        await connector.subscribeAsync(
+            topic=test_topic,
+            handler=my_test_handler,
+            qos=test_qos
+        )
+
+        # Wait for the _on_subscribe callback to finish.
+        await asyncio.wait_for(on_subscribe_completed.wait(), timeout=5)
+
+        # Assert
+        # Check that the topic exists as a key in the dictionary.
+        assert test_topic in connector._topic_handlers
+        # Check that the value for the key is the handler function we provided.
+        assert connector._topic_handlers[test_topic] is my_test_handler
+
     @pytest.mark.asyncio
     async def test_INTEGRATION_subscribe_without_handler(self, real_connected_connector):
         with pytest.raises(MyMqttSubscriptionError, match="No Handler provided during subscription") as exc_info:
@@ -322,4 +383,5 @@ class TestSubscription:
                 handler=None,
                 qos=1
             )
+            await asyncio.sleep(1)
 

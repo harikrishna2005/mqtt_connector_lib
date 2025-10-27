@@ -1,9 +1,11 @@
-from typing import Callable, Awaitable
+import time
+from typing import Callable, Awaitable, Any
 import asyncio
 import socket
 from gmqtt import Client as GMqttClient, MQTTConnectError
 
 from mqtt_connector_lib.exceptions import MyMqttBaseError, MyMqttConnectionError, MyMqttSubscriptionError
+from mqtt_connector_lib.interfaces import HandlerFunc
 
 import logging
 from mqtt_connector_lib import constants
@@ -52,8 +54,10 @@ class GMqttConnector:
         self.client.on_disconnect = self._on_disconnect
         self.client.on_subscribe = self._on_subscribe
 
-        # #local variable used
-        # self._pending_subscriptions = {}  # store mapping between mid -> topic names
+        # Topics and its handlers # Handler Management
+        self._topic_handlers : dict[str, HandlerFunc] = {}  # topic -> handler   => used on _on_message callback
+        # self._topics_handlers_counters ={}   # topic -> counter    => we will use this counter during un-subscribe to remove topics and its handlers
+        self._waiting_for_confirmation_subscriptions : dict[str, dict[str, Any]]= {}  # store mapping between mid -> topic names   =>  [mid] = {topic, handler, qos}
 
         # # Logger -  Create a LoggerAdapter to add the prefix
         # adapter_context = {'prefix': '[MQTT CONNECTOR]'}
@@ -303,14 +307,31 @@ class GMqttConnector:
         Called when the broker acknowledges a subscription request.
         'granted_qos' is a list of integers (the return codes).
         """
+
         # Retrieve the topic associated with this mid
         # topic = self._pending_subscriptions.pop(mid, None)
-        # topic_details = self._pending_subscriptions.pop(mid, None)
+        time.sleep(0.02)
+        topic_details = self._waiting_for_confirmation_subscriptions.pop(mid, None)
+        # topic_details = self._pending_subscriptions.get(mid, None)
+
+        topic_local= "mid is not stored"
+        handler_local = None
+        requested_qos_local = 0
+
+        if topic_details is not None:
+            topic_local = topic_details['topic']
+            handler_local = topic_details['handler']
+            requested_qos_local = topic_details['qos']
+
+
         logger.info(f"Subscription Acknowledged. Message ID: {mid}  Granted QoS levels :  {granted_qos}")
         for qos_code in granted_qos:
             if  qos_code < 128: # 0, 1, 2 are success codes
-                logger.info(f"subscription SUCCESS for (mid={mid}  ")
+                logger.info(f"subscription SUCCESS for (mid={mid}  topic = {topic_local}     Requested_QoS={requested_qos_local}     handler : {handler_local.__name__ if hasattr(handler_local, '__name__') else str(handler_local)} )   Granted QoS: {qos_code} ")
                 # store the subscription details in persistence store if needed
+
+                if topic_details is not None:
+                    self._store_in_memory_subscription(topic_local, handler_local ,granted_qos)
 
 
             else:
@@ -319,16 +340,24 @@ class GMqttConnector:
                 # (mid={mid}  topic = {topic} qos={qos} handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)} ).
 
 
+    def _store_in_memory_subscription(self, topic: str, handler: HandlerFunc, granted_qos: int):
+        # Store the topic and handler in the in-memory dictionary
+        # topic_details = self._pending_subscriptions.pop(mid, None)
+        if handler is None:
+            pass
+
+        self._topic_handlers[topic] = handler
 
 
 
 
-    async def subscribeAsync(self, topic: str, handler: Callable[[str, str], Awaitable[None]], qos: int = 0):
+    async def subscribeAsync(self, topic: str, handler: HandlerFunc, qos: int = 0):
 
         # If broker is down, log a warning and return without subscribing
         if not self._connected.is_set():
             logger.warning(
                 f"The MQTT broker is down.  The topic : {topic} with qos : {qos} handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)} will be re-subscribed when broker is back")
+
 
 
         error_details = {
@@ -354,8 +383,10 @@ class GMqttConnector:
 
 
         mid = self.client.subscribe(topic, qos)
+
         # Store the topic names against the mid for later lookup in the _on_subscribe callback
         # self._pending_subscriptions[mid] = {"topic" : topic, "handler": handler.__name__ if hasattr(handler, '__name__') else str(handler), "qos": qos}
+        self._waiting_for_confirmation_subscriptions[mid] = {"topic" : topic, "handler": handler, "qos": qos}
 
         # logger.info(f"Subscribed to topic '{topic}' with qos={qos} and handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)}")
         logger.info(f"Subscription request sent (mid={mid}  topic = {topic} qos={qos} handler : {handler.__name__ if hasattr(handler, '__name__') else str(handler)} ). Waiting for SUBACK...")

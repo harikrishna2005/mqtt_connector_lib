@@ -2,7 +2,7 @@ import pytest_asyncio
 import pytest
 import logging
 
-from mqtt_connector_lib.exceptions import InvalidHandlerError
+from mqtt_connector_lib.exceptions import InvalidHandlerError, HandlerNotFoundError
 
 logging.disable(logging.CRITICAL)
 
@@ -41,12 +41,12 @@ def test_get_handler(handler_registry):
     assert retrieved_handler == handler_func
 
     # Test getting non-existent handler
-    non_existent_handler = handler_registry.get_handler("non_existent_id")
-    assert non_existent_handler is None
+    with pytest.raises(HandlerNotFoundError):
+        handler_registry.get_handler("non_existent_id")
 
     # Test with empty string
-    empty_handler = handler_registry.get_handler("")
-    assert empty_handler is None
+    with pytest.raises(HandlerNotFoundError):
+        handler_registry.get_handler("")
 
     # Test with multiple handlers
     async def another_handler(topic: str, payload: str):
@@ -69,8 +69,8 @@ def test_find_handler_id_by_function(handler_registry):
     handler_func = print_message_handler.handle_messageAsync
 
     # Test finding handler that hasn't been registered yet
-    handler_id = handler_registry.find_handler_id_by_function(handler_func)
-    assert handler_id is None
+    with pytest.raises(HandlerNotFoundError):
+        handler_registry.find_handler_id_by_function(handler_func)
 
     # Register the handler
     registered_id = handler_registry.register_handler(handler_func)
@@ -85,8 +85,8 @@ def test_find_handler_id_by_function(handler_registry):
         pass
 
     # Should not find unregistered function
-    not_found_id = handler_registry.find_handler_id_by_function(another_handler)
-    assert not_found_id is None
+    with pytest.raises(HandlerNotFoundError):
+        handler_registry.find_handler_id_by_function(another_handler)
 
     # Register the second handler
     another_registered_id = handler_registry.register_handler(another_handler)
@@ -100,8 +100,8 @@ def test_find_handler_id_by_function(handler_registry):
     assert first_found != second_found
 
     # Test with None (edge case)
-    none_result = handler_registry.find_handler_id_by_function(None)
-    assert none_result is None
+    with pytest.raises(HandlerNotFoundError):
+        handler_registry.find_handler_id_by_function(None)
 
 
 def test_register_handler_invalid_signature_raises_exception(handler_registry):
@@ -181,33 +181,41 @@ def test_INTEGRATION_Register_Multiple_and_Retrieve_Exact_Handler(handler_regist
     handler_id1 = handler_registry.register_handler(handler_func1)
     handler_id2 = handler_registry.register_handler(custom_handler_2)
     handler_id3 = handler_registry.register_handler(custom_handler_3)
+    handler_id4 = handler_registry.register_handler(handler_func1,"myhandler")  # Register first handler again
+    handler_id5 = handler_registry.register_handler(handler_func1)
 
     # Verify all IDs are unique
     assert handler_id1 != handler_id2
     assert handler_id2 != handler_id3
     assert handler_id1 != handler_id3
+    assert  handler_id4 != handler_id1
 
     # Retrieve each handler by its specific ID
     retrieved_handler1 = handler_registry.get_handler(handler_id1)
     retrieved_handler2 = handler_registry.get_handler(handler_id2)
     retrieved_handler3 = handler_registry.get_handler(handler_id3)
+    retrieved_handler4 = handler_registry.get_handler(handler_id4)
 
     # Verify each retrieved handler matches its original
     assert retrieved_handler1 == handler_func1
     assert retrieved_handler2 == custom_handler_2
     assert retrieved_handler3 == custom_handler_3
+    assert retrieved_handler4 == handler_func1
 
     # Verify handlers are distinct from each other
     assert retrieved_handler1 != retrieved_handler2
     assert retrieved_handler2 != retrieved_handler3
     assert retrieved_handler1 != retrieved_handler3
+    assert retrieved_handler4 == retrieved_handler1
 
     # Test finding handlers by function reference
     found_id1 = handler_registry.find_handler_id_by_function(handler_func1)
     found_id2 = handler_registry.find_handler_id_by_function(custom_handler_2)
     found_id3 = handler_registry.find_handler_id_by_function(custom_handler_3)
+    found_id4 = handler_registry.find_handler_id_by_function(handler_func1)
 
     # Verify found IDs match the original registration IDs
     assert found_id1 == handler_id1
     assert found_id2 == handler_id2
     assert found_id3 == handler_id3
+    # assert found_id4 == handler_id4

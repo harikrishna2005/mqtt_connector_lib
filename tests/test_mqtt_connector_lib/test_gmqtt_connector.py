@@ -376,6 +376,60 @@ class TestSubscription:
         assert connector._topic_handlers[test_topic] is my_test_handler
 
     @pytest.mark.asyncio
+    async def test_INTEGRATION_unsubscribe_removes_from_in_memory(self, real_connected_connector):
+        """
+        Verifies that after a successful unsubscription, the topic and its handler
+        are correctly removed from the _topic_handlers dictionary.
+        """
+        # Arrange
+        connector = real_connected_connector
+        test_topic = "integration/test/unsubscribe"
+        test_qos = 1
+        on_subscribe_completed = asyncio.Event()
+        on_unsubscribe_completed = asyncio.Event()
+
+        async def dummy_handler(topic, payload):
+            pass
+
+        # 1. Subscribe to a topic first to ensure it's in memory.
+        # Patch on_subscribe to wait for confirmation.
+        original_on_subscribe = connector.client.on_subscribe
+
+        def side_effect_on_subscribe(*args, **kwargs):
+            original_on_subscribe(*args, **kwargs)
+            on_subscribe_completed.set()
+
+        connector.client.on_subscribe = side_effect_on_subscribe
+
+        await connector.subscribeAsync(
+            topic=test_topic,
+            handler=dummy_handler,
+            qos=test_qos
+        )
+        await asyncio.wait_for(on_subscribe_completed.wait(), timeout=5)
+        assert test_topic in connector._topic_handlers  # Verify it was added
+
+        # 2. Now, patch on_unsubscribe to wait for the unsubscription confirmation.
+        original_on_unsubscribe = connector.client.on_unsubscribe
+
+        def side_effect_on_unsubscribe(*args, **kwargs):
+            original_on_unsubscribe(*args, **kwargs)
+            on_unsubscribe_completed.set()
+
+        connector.client.on_unsubscribe = side_effect_on_unsubscribe
+
+        # Act: Call unsubscribeAsync to initiate the unsubscription process.
+        await connector.unsubscribeAsync(topic=test_topic)
+
+        # Wait for the _on_unsubscribe callback to finish.
+        await asyncio.wait_for(on_unsubscribe_completed.wait(), timeout=5)
+
+        # Assert: Check that the topic is no longer in the dictionary.
+        assert test_topic not in connector._topic_handlers
+
+
+
+    @pytest.mark.asyncio
     async def test_INTEGRATION_subscribe_without_handler(self, real_connected_connector):
         with pytest.raises(MyMqttSubscriptionError, match="No Handler provided during subscription") as exc_info:
             await real_connected_connector.subscribeAsync(

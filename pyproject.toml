@@ -49,6 +49,7 @@ gmqtt = "0.7.0"
 pytest = {version = "^7.4.0", optional = true}
 pytest-asyncio = {version = "^0.21.0", optional = true}
 pytest-cov = {version = "^4.1.0", optional = true}
+dependency-injector = "^4.48.2"
 
 [tool.poetry.extras]
 test = ["pytest", "pytest-asyncio", "pytest-cov"]

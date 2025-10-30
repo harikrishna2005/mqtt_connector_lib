@@ -33,7 +33,7 @@ class HandlerRegistry(IHandlerRegistry):
             # Fallback for edge cases where __module__ or __qualname__ might not exist
             return f"handler_{id(func)}"
 
-    def register_handler(self, handler_func: HandlerFunc) -> str:
+    def register_handler(self, handler_func: HandlerFunc, user_friendly_name:str=None) -> str:
         """Register a handler function and return its ID"""
         # if not callable(handler_func):
         #     # raise ValueError(f"Handler function must be callable, got {type(handler_func)}")
@@ -66,7 +66,8 @@ class HandlerRegistry(IHandlerRegistry):
             logger.error(f"{handler_error}")
             raise handler_error
 
-        handler_id = self.get_handler_id(handler_func)
+        # handler_id = self.get_handler_id(handler_func)
+        handler_id : str = user_friendly_name if user_friendly_name else self.get_handler_id(handler_func)
 
         if handler_id in self._handler_registry:
             logger.warning(f"Handler : '{handler_id}' is already registered, overwriting it.")
@@ -79,18 +80,34 @@ class HandlerRegistry(IHandlerRegistry):
         """Remove a handler from the registry"""
         if handler_id in self._handler_registry:
             del self._handler_registry[handler_id]
-            logger.info(f"[GMQTT] Unregistered handler '{handler_id}'")
+            logger.info(f"Unregistered handler '{handler_id}'")
             return True
         return False
 
-    def get_handler(self, handler_id: str) -> Optional[HandlerFunc]:
+    def get_handler(self, handler_id: str) -> HandlerFunc:
         """Get a handler function by its ID"""
+        handler = self._handler_registry.get(handler_id)
+        if handler is None:
+            raise HandlerNotFoundError(f"Handler with ID '{handler_id}' not found.")
+        return handler
         return self._handler_registry.get(handler_id)
 
-    def find_handler_id_by_function(self, func: HandlerFunc) -> Optional[str]:
-        """Find handler ID by comparing function objects"""
+
+    # def find_handler_id_by_function(self, func: HandlerFunc) -> Optional[str]:
+    #     """Find handler ID by comparing function objects"""
+    #     for handler_id, registered_func in self._handler_registry.items():
+    #         if registered_func == func:
+    #             return handler_id
+    #     return None
+    def find_handler_id_by_function(self, func: HandlerFunc) -> str:
+        """
+        Find handler ID by comparing function objects.
+
+        Raises:
+            HandlerNotFoundError: If the handler function is not found in the registry.
+        """
         for handler_id, registered_func in self._handler_registry.items():
             if registered_func == func:
                 return handler_id
-        return None
+        raise HandlerNotFoundError(f"Handler function '{getattr(func, '__name__', 'unknown')}' not found in registry.")
 

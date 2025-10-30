@@ -81,11 +81,13 @@ async def main():
 
     try :
         await mqtt_client_connector.connectAsync(username=test_client.user_name, password=test_client.password)
-        await mqtt_client_connector.subscribeAsync(topic="my_own_topic", handler=sample_handler, qos=0)
+        await mqtt_client_connector.subscribeAsync(topic="my_own_topic", handler=sample_handler, qos=1)
+
         await asyncio.sleep(20)
-        await mqtt_client_connector.subscribeAsync(topic="another_topic", handler=sample_handler, qos=0)
-        await mqtt_client_connector.subscribeAsync(topic="one_topic", handler=sample_handler, qos=1)
-        await mqtt_client_connector.subscribeAsync(topic="test_client_12345", handler=sample_handler, qos=1)
+        await mqtt_client_connector.unsubscribeAsync("my_own_topic")
+        # await mqtt_client_connector.subscribeAsync(topic="another_topic", handler=sample_handler, qos=0)
+        # await mqtt_client_connector.subscribeAsync(topic="one_topic", handler=sample_handler, qos=1)
+        # await mqtt_client_connector.subscribeAsync(topic="test_client_12345", handler=sample_handler, qos=1)
 
 
 

@@ -435,7 +435,11 @@ class GMqttConnector:
                                                         **error_details)
             logger.error(f"No Handler provided during subscription to topic '{topic}' ==> {handler_exception}")
             raise handler_exception
+
         self._handler_registry.register_handler(handler)
+
+
+
 
 
 

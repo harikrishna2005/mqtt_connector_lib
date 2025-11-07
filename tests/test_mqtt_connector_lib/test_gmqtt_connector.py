@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import pytest_asyncio
 import pytest
 import logging
@@ -47,6 +49,9 @@ async def connected_connector(connector):
     """A connector that is already in a 'connected' state."""
     connector._connected.set()
     return connector
+
+
+
 
 
 # Test Cases
@@ -216,6 +221,8 @@ class TestSubscription:
             # port=1999,
             client_id="test_client_12345")
 
+
+
         # with patch('mqtt_connector_lib.gmqtt_connector.GMqttClient') as MockClient:
         #     instance = MockClient.return_value
         #     instance.subscribe = AsyncMock()
@@ -231,6 +238,39 @@ class TestSubscription:
         #     conn._connected.set()  # Mark as connected
         yield conn
         await conn.disconnectAsync()
+
+
+    @pytest.fixture
+    def callback_waiter(self):
+        """
+        Provides a helper to patch a gmqtt client callback and wait for it to be called.
+        """
+        @asynccontextmanager
+        async def _waiter(connector: GMqttConnector, callback_name: str):
+            """
+            An async context manager to wait for a specific callback.
+            Args:
+                connector: The GMqttConnector instance.
+                callback_name: The name of the callback to wait for (e.g., 'on_subscribe').
+            """
+            callback_event = asyncio.Event()
+            original_callback = getattr(connector.client, callback_name)
+
+            def side_effect(*args, **kwargs):
+                original_callback(*args, **kwargs)
+                callback_event.set()
+
+            setattr(connector.client, callback_name, side_effect)
+
+            try:
+                yield
+            finally:
+                await asyncio.wait_for(callback_event.wait(), timeout=5)
+                # Restore original callback
+                setattr(connector.client, callback_name, original_callback)
+
+        return _waiter
+
 
     # @pytest.mark.asyncio
     # async def test_subscribe_async_success(self, mock_connected_connector):
@@ -282,6 +322,9 @@ class TestSubscription:
     #
     #     except MyMqttSubscriptionError as e:
     #         pytest.fail(f"subscribeAsync raised an unexpected exception on success: {e}")
+
+
+
 
     @pytest.mark.asyncio
     async def test_INTEGRATION_subscribe_success_path_is_executed(self, real_connected_connector, caplog):
@@ -376,7 +419,7 @@ class TestSubscription:
         assert connector._topic_handlers[test_topic] is my_test_handler
 
     @pytest.mark.asyncio
-    async def test_INTEGRATION_unsubscribe_removes_from_in_memory(self, real_connected_connector):
+    async def test_INTEGRATION_unsubscribe_removes_from_in_memory(self, real_connected_connector,callback_waiter):
         """
         Verifies that after a successful unsubscription, the topic and its handler
         are correctly removed from the _topic_handlers dictionary.
@@ -385,31 +428,79 @@ class TestSubscription:
         connector = real_connected_connector
         test_topic = "integration/test/unsubscribe"
         test_qos = 1
-        on_subscribe_completed = asyncio.Event()
-        on_unsubscribe_completed = asyncio.Event()
+        # on_subscribe_completed = asyncio.Event()
+        # on_unsubscribe_completed = asyncio.Event()
 
         async def dummy_handler(topic, payload):
             pass
 
+        # # 1. Subscribe to a topic first to ensure it's in memory.
+        # # Patch on_subscribe to wait for confirmation.
+        # original_on_subscribe = connector.client.on_subscribe
+        #
+        # def side_effect_on_subscribe(*args, **kwargs):
+        #     original_on_subscribe(*args, **kwargs)
+        #     on_subscribe_completed.set()
+        #
+        # connector.client.on_subscribe = side_effect_on_subscribe
+        #
+        # await connector.subscribeAsync(
+        #     topic=test_topic,
+        #     handler=dummy_handler,
+        #     qos=test_qos
+        # )
+
         # 1. Subscribe to a topic first to ensure it's in memory.
-        # Patch on_subscribe to wait for confirmation.
-        original_on_subscribe = connector.client.on_subscribe
+        async with callback_waiter(connector, 'on_subscribe'):
+            await connector.subscribeAsync(
+                topic=test_topic,
+                handler=dummy_handler,
+                qos=test_qos
+            )
 
-        def side_effect_on_subscribe(*args, **kwargs):
-            original_on_subscribe(*args, **kwargs)
-            on_subscribe_completed.set()
-
-        connector.client.on_subscribe = side_effect_on_subscribe
-
-        await connector.subscribeAsync(
-            topic=test_topic,
-            handler=dummy_handler,
-            qos=test_qos
-        )
-        await asyncio.wait_for(on_subscribe_completed.wait(), timeout=5)
+        # await asyncio.wait_for(on_subscribe_completed.wait(), timeout=5)
         assert test_topic in connector._topic_handlers  # Verify it was added
 
-        # 2. Now, patch on_unsubscribe to wait for the unsubscription confirmation.
+        # # 2. Now, patch on_unsubscribe to wait for the unsubscription confirmation.
+        # original_on_unsubscribe = connector.client.on_unsubscribe
+        #
+        # def side_effect_on_unsubscribe(*args, **kwargs):
+        #     original_on_unsubscribe(*args, **kwargs)
+        #     on_unsubscribe_completed.set()
+        #
+        # connector.client.on_unsubscribe = side_effect_on_unsubscribe
+        #
+        # # Act: Call unsubscribeAsync to initiate the unsubscription process.
+        # await connector.unsubscribeAsync(topic=test_topic)
+        #
+        # # Wait for the _on_unsubscribe callback to finish.
+        # await asyncio.wait_for(on_unsubscribe_completed.wait(), timeout=5)
+        #
+        # # Assert: Check that the topic is no longer in the dictionary.
+        # assert test_topic not in connector._topic_handlers
+
+        # Act: Unsubscribe from the topic, waiting for the UNSUBACK.
+        async with callback_waiter(connector, 'on_unsubscribe'):
+            await connector.unsubscribeAsync(topic=test_topic)
+
+        # Assert: Check that the topic is no longer in the dictionary.
+        assert test_topic not in connector._topic_handlers
+
+    @pytest.mark.asyncio
+    async def test_INTEGRATION_unsubscribe_from_non_existent_topic(self, real_connected_connector):
+        """
+        Verifies that unsubscribing from a topic that was never subscribed
+        completes without error and doesn't alter the handler mapping.
+        """
+        # Arrange
+        connector = real_connected_connector
+        test_topic = "this/topic/does/not/exist"
+        on_unsubscribe_completed = asyncio.Event()
+
+        # Ensure the topic is not present before the test
+        assert test_topic not in connector._topic_handlers
+
+        # Patch on_unsubscribe to wait for the UNSUBACK confirmation from the broker
         original_on_unsubscribe = connector.client.on_unsubscribe
 
         def side_effect_on_unsubscribe(*args, **kwargs):
@@ -418,16 +509,16 @@ class TestSubscription:
 
         connector.client.on_unsubscribe = side_effect_on_unsubscribe
 
-        # Act: Call unsubscribeAsync to initiate the unsubscription process.
+        # Act
+        # Call unsubscribeAsync for the non-existent topic. This should not raise an error.
         await connector.unsubscribeAsync(topic=test_topic)
 
-        # Wait for the _on_unsubscribe callback to finish.
+        # Wait for the _on_unsubscribe callback to be triggered by the broker's UNSUBACK.
         await asyncio.wait_for(on_unsubscribe_completed.wait(), timeout=5)
 
-        # Assert: Check that the topic is no longer in the dictionary.
+        # Assert
+        # The operation should complete gracefully, and the topic should still not be in the handlers dict.
         assert test_topic not in connector._topic_handlers
-
-
 
     @pytest.mark.asyncio
     async def test_INTEGRATION_subscribe_without_handler(self, real_connected_connector):
@@ -438,4 +529,43 @@ class TestSubscription:
                 qos=1
             )
             await asyncio.sleep(1)
+
+    @pytest.mark.parametrize(
+        "scenario, operation, topic, qos, handler, expected_in_handlers",
+        [
+            # scenario,                                        operation,                   topic,                                      qos,              handler,                  expected_in_handlers
+            ("Subscribe to a new topic",                      "subscribe",         "integration/combined/topic1",                        1,            dummy_handler_one,                True             ),
+            ("Unsubscribe from an existing topic",            "unsubscribe",       "integration/combined/topic2",                        1,            dummy_handler_two,                False            ),
+        ]
+    )
+    @pytest.mark.asyncio
+    async def test_INTEGRATION_combined_mqtt_operations(
+            self, real_connected_connector, callback_waiter,
+            scenario, operation, topic, qos, handler, expected_in_handlers
+    ):
+        """
+        A single parameterized test to handle various MQTT operations like
+        subscribe and unsubscribe, and can be extended for publish.
+        """
+        # Arrange
+        connector = real_connected_connector
+
+        # For 'unsubscribe' tests, we must first subscribe to the topic.
+        if operation == "unsubscribe":
+            # Ensure the topic is subscribed before we try to unsubscribe it.
+            async with callback_waiter(connector, 'on_subscribe'):
+                await connector.subscribeAsync(topic=topic, handler=handler, qos=qos)
+            assert topic in connector._topic_handlers, "Topic No longer should be in dictionary"  # Assert: Check that the topic is no longer in the dictionary.
+
+        # Act
+        if operation == "subscribe":
+            async with callback_waiter(connector, 'on_subscribe'):
+                await connector.subscribeAsync(topic=topic, handler=handler, qos=qos)
+            assert topic in connector._topic_handlers, "Topic should be in dictionary"   # Assert: Check that the topic should be in dictionary.
+            handler_id = await connector.getHandlerIdAsync(handler)
+            retrieved_handler = await connector.getHandlerFunctionAsync(handler_id)
+            assert retrieved_handler is handler                                         # Assert: retrieved handler should match original handler function.
+
+
+
 

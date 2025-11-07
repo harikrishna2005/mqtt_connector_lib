@@ -7,6 +7,7 @@ from gmqtt import Client as GMqttClient, MQTTConnectError
 from mqtt_connector_lib.container_mqtt import mqttContainer
 from mqtt_connector_lib.exceptions import MyMqttBaseError, MyMqttConnectionError, MyMqttSubscriptionError
 from mqtt_connector_lib.interfaces import HandlerFunc
+from mqtt_connector_lib.on_message_handler_executor import OnMessageHandlerExecutor
 
 import logging
 from mqtt_connector_lib import constants
@@ -26,6 +27,9 @@ class BrokerClient:
         self.password = password
 
 
+
+
+
 class GMqttConnector:
     """
     Information
@@ -42,7 +46,8 @@ class GMqttConnector:
     """
 
     def __init__(self, broker_details: BrokerClient,
-                 clean_session=True
+                 clean_session=True,
+                 max_on_message_handler_workers=5
                  ):
         self.client_id = broker_details.client_id
         self.host = broker_details.host
@@ -59,6 +64,10 @@ class GMqttConnector:
         self.client.on_disconnect = self._on_disconnect
         self.client.on_subscribe = self._on_subscribe
         self.client.on_unsubscribe = self._on_unsubscribe
+        self.client.on_message = self._on_message
+
+
+
 
         # Topics and its handlers # Handler Management
         self._topic_handlers : dict[str, HandlerFunc] = {}  # topic -> handler   => used on _on_message callback
@@ -68,9 +77,8 @@ class GMqttConnector:
         self._handler_registry = mqttContainer.handler_registry()
         # self._user_friendly_handlers: dict[str, HandlerFunc] = {}  # consumer app accessibility
 
-        # # Logger -  Create a LoggerAdapter to add the prefix
-        # adapter_context = {'prefix': '[MQTT CONNECTOR]'}
-        # self.logger1 = logging.LoggerAdapter(logger, adapter_context)
+        # _on_message handler execution
+        self._on_message_handler_executor = OnMessageHandlerExecutor(max_workers=max_on_message_handler_workers)
 
         logger.info(f"MQTT Client Initialied: {self.client_id}")
 
@@ -82,8 +90,11 @@ class GMqttConnector:
     async def unRegisterHandlerFunctionAsync(self, user_friendly_name: str) -> bool:
         return self._handler_registry.unregister_handler(user_friendly_name)
 
-    async def getHandlerFunctionByNameAsync(self, user_friendly_name: str) -> HandlerFunc:
+    async def getHandlerFunctionAsync(self, user_friendly_name: str) -> HandlerFunc:
         return self._handler_registry.get_handler(user_friendly_name)
+
+    async def getHandlerIdAsync(self, handler_func: HandlerFunc) -> str:
+        return self._handler_registry.get_handler_id(handler_func)
 
 
     async def connectAsync(self, username=None, password=None):
@@ -112,6 +123,9 @@ class GMqttConnector:
             # logger.info(f"Below self.client.connect and going to wait for connected wait event ")
             await asyncio.wait_for(self._connected.wait(), timeout=30)
             # logger.info(f"after asyncio wait for connected event     ")
+
+            # Start _on_message handler executor after successful connection
+            await self._on_message_handler_executor.start()
 
 
         except socket.gaierror as se:
@@ -258,6 +272,9 @@ class GMqttConnector:
             if not self._connected.is_set():
                 logger.info(f"Client : {self.client_id} already disconnected")
                 return
+            # Stop _on_message handler executor before disconnect
+            await self._on_message_handler_executor.stop()
+
             await self.client.disconnect()
             logger.info("Successfully disconnected from broker")
         except ConnectionError as ce:
@@ -391,7 +408,12 @@ class GMqttConnector:
 
         # logger.info(f"Subscription Acknowledged. Message ID: {mid}  Granted QoS levels :  {granted_qos}")
 
-
+    def _on_message(self, client, topic, payload, qos, properties):
+        # logger.info(f"zzzzzzzzzzzzzzzzzzzz message receive in on_message callback  topic: {topic}   payload: {payload}   qos: {qos} ")
+        handler = self._topic_handlers.get(topic, None)
+        # handler(topic, payload)  # - Raw Payload
+        # Execute handler asynchronously instead of direct call
+        self._on_message_handler_executor.execute_on_message_handler(topic, payload, handler)
 
 
     # def _store_in_memory_subscription(self, topic: str, handler: HandlerFunc, granted_qos: int):
@@ -510,6 +532,39 @@ class GMqttConnector:
                 **error_details
             )
             logger.error(f"Un-expected exception occured during unsubscribe : {unsubscription_error}")
+            # TODO, - store this unsubscription failure topic in persistence for future processing -
             # Raise the exception to notify the caller
             raise unsubscription_error from e
 
+
+    async def publishAsync(self, topic: str, payload: str, qos: int = 0, retain: bool = False):
+        if not self._connected.is_set():
+            logger.warning(
+                f"The MQTT broker is down.  The topic : {topic} with payload : {payload} will be re-published when broker is back")
+            # TODO, -PERSISTANCE- save in persistence for re-publishing when broker is back
+            return
+
+        try:
+            self.client.publish(topic, payload, qos, retain)
+            # logger.debug(f"Published message to topic '{topic}' with payload: {payload}, qos=(q{qos}), retain={retain}")
+        except Exception as e:
+            error_details = {
+                "MQTT_PUBLISH_ERROR_DETAILS": {
+                    "host": self.host,
+                    "port": self.port,
+                    "client_id": self.client_id,
+                    "topic": topic,
+                    "payload": payload,
+                    "qos": qos,
+                    "retain": retain,
+                    "exception_full": str(e)
+                }
+            }
+            publish_error = MyMqttBaseError(
+                message=f"Failed to publish to topic '{topic}': {e}",
+                reason_code="publish_failed",
+                **error_details
+            )
+            logger.error(f"Un-expected exception occured during publish : {publish_error}")
+            # TODO, - store this publish failure topic in persistence for future processing -
+            raise publish_error from e

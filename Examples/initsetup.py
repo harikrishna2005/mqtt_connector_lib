@@ -45,8 +45,8 @@ def setup_logging():
     stream_handler.addFilter(ContextFilter())  # Ensure filter is on the handler
 
     root_logger = logging.getLogger()
-    # root_logger.setLevel(logging.INFO)
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(logging.INFO)
+    # root_logger.setLevel(logging.DEBUG)
     root_logger.handlers.clear()
     root_logger.addHandler(stream_handler)
 

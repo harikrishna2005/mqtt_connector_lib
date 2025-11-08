@@ -1,12 +1,7 @@
 # src/mqtt_connector_lib/on_message_handler_executor.py
 import asyncio
 import logging
-from typing import Callable, Any
-from concurrent.futures import ThreadPoolExecutor
-
-# logger = logging.getLogger(__name__)
-
-import logging
+from typing import Any
 from mqtt_connector_lib import constants
 from mqtt_connector_lib.interfaces import HandlerFunc
 
@@ -39,12 +34,25 @@ class OnMessageHandlerExecutor:
 
     async def stop(self):
         """Gracefully stop all _on_message workers"""
+        logger.debug("Stopping _on_message handler executor...")
         self._shutdown = True
-        # self._thread_pool.shutdown(wait=True)
 
+        # Cancel all worker tasks
+        for worker in self._workers:
+            if not worker.done():
+                worker.cancel()
+
+        # Wait for all workers to finish with a timeout
         if self._workers:
-            await asyncio.gather(*self._workers, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._workers, return_exceptions=True),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Timeout waiting for workers to stop, forcing shutdown")
 
+        self._workers.clear()
         logger.info("Stopped all _on_message handler execution workers")
 
     def execute_on_message_handler(self, topic: str, payload: Any, handler: HandlerFunc) -> bool:
@@ -56,6 +64,23 @@ class OnMessageHandlerExecutor:
             logger.warning(f"_on_message handler queue full, dropping execution for topic: {topic}")
             return False
 
+    # async def _on_message_worker(self, worker_name: str):
+    #     """Worker that executes handlers from _on_message queue"""
+    #     while not self._shutdown:
+    #         try:
+    #             topic, payload, handler = await asyncio.wait_for(
+    #                 self._on_message_handler_queue.get(), timeout=1.0
+    #             )
+    #
+    #             # await self._execute_on_message_handler(topic, payload, handler)
+    #             await handler(topic, payload)
+    #             self._on_message_handler_queue.task_done()
+    #
+    #         except asyncio.TimeoutError:
+    #             continue
+    #         except Exception as e:
+    #             logger.error(f"_on_message handler worker {worker_name} error: {e}")
+
     async def _on_message_worker(self, worker_name: str):
         """Worker that executes handlers from _on_message queue"""
         while not self._shutdown:
@@ -64,14 +89,23 @@ class OnMessageHandlerExecutor:
                     self._on_message_handler_queue.get(), timeout=1.0
                 )
 
-                # await self._execute_on_message_handler(topic, payload, handler)
-                await handler(topic, payload)
-                self._on_message_handler_queue.task_done()
+                try:
+                    await handler(topic, payload)
+                except Exception as handler_error:
+                    logger.error(f"Handler execution error for topic {topic}: {handler_error}")
+                finally:
+                    # Always mark task as done, even if handler fails
+                    self._on_message_handler_queue.task_done()
 
             except asyncio.TimeoutError:
                 continue
+            except asyncio.CancelledError:
+                # Handle graceful shutdown when task is cancelled
+                logger.debug(f"Worker {worker_name} cancelled during shutdown")
+                break
             except Exception as e:
                 logger.error(f"_on_message handler worker {worker_name} error: {e}")
+
 
     # async def _execute_on_message_handler(self, topic: str, payload: Any, handler: Callable):
     #     """Execute handler from _on_message callback (handles both sync/async)"""

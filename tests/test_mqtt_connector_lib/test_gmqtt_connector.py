@@ -42,7 +42,13 @@ async def connector(mock_gmqtt_client):
                           clean_session=True)
     # Replace the real client with our mock
     conn.client = mock_gmqtt_client
-    return conn
+    yield conn
+    # disconnectAsync already stops the executor internally
+    try:
+        await conn.disconnectAsync()
+    except Exception:
+        pass  # Ignore cleanup errors
+
 
 @pytest_asyncio.fixture
 async def connected_connector(connector):
@@ -92,7 +98,7 @@ async def test_connect_no_internet_or_network_error(connector, mock_gmqtt_client
         await connector.connectAsync()
 
     assert "The network location cannot be reached" in excinfo.value.message
-    assert excinfo.value.reason_code == "Might be INTERNET issue"
+    assert excinfo.value.reason_code == "network_unreachable"
     assert connector._connected.is_set() is False
     # print("Success: test_connect_no_internet_or_network_error")
 
@@ -105,8 +111,15 @@ async def test_INTEGRATION_connect_successful():
         # port=1999,
         client_id="test_client_12345")
     mqtt_client_connector = GMqttConnector(broker_details=test_client)
-    await mqtt_client_connector.connectAsync(username=test_client.user_name, password=test_client.password)
-    assert mqtt_client_connector._connected.is_set() is True
+    try:
+        await mqtt_client_connector.connectAsync(username=test_client.user_name, password=test_client.password)
+        assert mqtt_client_connector._connected.is_set() is True
+    finally:
+        # disconnectAsync already stops the executor internally
+        try:
+            await mqtt_client_connector.disconnectAsync()
+        except Exception:
+            pass
 
 
 @pytest.mark.asyncio
@@ -221,23 +234,16 @@ class TestSubscription:
             # port=1999,
             client_id="test_client_12345")
 
-
-
-        # with patch('mqtt_connector_lib.gmqtt_connector.GMqttClient') as MockClient:
-        #     instance = MockClient.return_value
-        #     instance.subscribe = AsyncMock()
-        #     instance.unsubscribe = AsyncMock()
-        #
-        #     conn = GMqttConnector(broker_details=broker_details, clean_session=True)
-        #     conn.client = instance
-        #     conn._connected.set()  # Mark as connected
-        #     yield conn
         conn = GMqttConnector(broker_details=broker_details, clean_session=True)
         await conn.connectAsync(username=broker_details.user_name, password=broker_details.password)
-        #     conn.client = instance
-        #     conn._connected.set()  # Mark as connected
+
         yield conn
-        await conn.disconnectAsync()
+
+        # disconnectAsync already stops the executor internally
+        try:
+            await conn.disconnectAsync()
+        except Exception:
+            pass
 
 
     @pytest.fixture

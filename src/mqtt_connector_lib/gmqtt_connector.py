@@ -160,7 +160,7 @@ class GMqttConnector:
             }
             connection_error = MyMqttConnectionError(
                 message=f"Invalid PORT: {self.port}",
-                reason_code="dns_resolution_failed",
+                reason_code="connection_refused",
                 **error_details
             )
             logger.error(f"{connection_error}")
@@ -205,6 +205,16 @@ class GMqttConnector:
             raise connection_error from te
 
         except OSError as ose:
+            # On Windows, invalid port can raise OSError with WinError 121 (semaphore timeout)
+            # or WinError 10061 (connection refused)
+            # Check if it's a port-related issue vs network issue
+            is_port_error = False
+            if hasattr(ose, 'winerror'):
+                # Windows-specific error codes for connection issues
+                if ose.winerror in [121, 10061, 10060]:  # Semaphore timeout, Connection refused, Timeout
+                    is_port_error = True
+            elif isinstance(ose, ConnectionRefusedError):
+                is_port_error = True
 
             error_details = {
                 "MQTT_CONNECTION_ERROR_DETAILS": {
@@ -215,11 +225,20 @@ class GMqttConnector:
                     "client_id": self.client_id,
                 }
             }
-            connection_error = MyMqttConnectionError(
-                message=f"The network location cannot be reached",
-                reason_code="Might be INTERNET issue",
-                **error_details
-            )
+
+            if is_port_error:
+                connection_error = MyMqttConnectionError(
+                    message=f"Invalid PORT: {self.port}",
+                    reason_code="invalid_port",
+                    **error_details
+                )
+            else:
+                connection_error = MyMqttConnectionError(
+                    message=f"The network location cannot be reached",
+                    reason_code="network_unreachable",
+                    **error_details
+                )
+
             logger.error(f"{connection_error}")
             raise connection_error from ose
 

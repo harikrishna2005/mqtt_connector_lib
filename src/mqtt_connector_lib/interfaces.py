@@ -6,7 +6,7 @@ HandlerFunc: TypeAlias = Callable[[str, str], Awaitable[None]]
 
 class IMessageHandler(ABC):
     @abstractmethod
-    async def handle_messageAsync(self, topic: str, payload: str): pass
+    async def handle_messageAsync(self, topic: str, payload: bytes): pass
 
 
 class IHandlerRegistry(ABC):

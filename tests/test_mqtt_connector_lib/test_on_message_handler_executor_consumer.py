@@ -23,7 +23,11 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
 
         yield conn
 
-        await conn.disconnectAsync()
+        # disconnectAsync already stops the executor internally
+        try:
+            await conn.disconnectAsync()
+        except Exception:
+            pass
 
     @pytest.mark.asyncio
     async def test_consumer_registers_async_handler_and_receives_messages(self, real_connected_connector):
@@ -115,18 +119,15 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
         successful_messages = []
         error_messages = []
 
-        async def faulty_handler(topic: str, payload: str):
+        async def faulty_handler(topic: str, payload: bytes):
             """Consumer's handler that sometimes fails"""
-            try:
-                # Fix: Check for exact match or use "error" instead of "error_message"
-                if payload == "error_message":  # Exact match
-                    error_messages.append(payload)
-                    raise ValueError(f"Processing failed for: {payload}")
+            # Check for exact match with bytes
+            if payload == b"error_message":
+                error_messages.append(payload)
+                raise ValueError(f"Processing failed for: {payload}")
 
-                successful_messages.append({"topic": topic, "payload": payload})
-            except Exception as e:
-                print(f"Handler exception for {payload}: {e}")
-                raise
+            # Only successful messages get here
+            successful_messages.append({"topic": topic, "payload": payload})
 
         test_topic = "test/errors/handler/12345"
         await real_connected_connector.subscribeAsync(test_topic, faulty_handler)
@@ -153,11 +154,11 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
         alerts_received = []
         metrics_received = []
 
-        async def security_alert_handler(topic: str, payload: str):
+        async def security_alert_handler(topic: str, payload: bytes):
             """Consumer's security alert handler"""
             alerts_received.append({"topic": topic, "alert": payload, "priority": "high"})
 
-        async def system_metrics_handler(topic: str, payload: str):
+        async def system_metrics_handler(topic: str, payload: bytes):
             """Consumer's system metrics handler"""
             metrics_received.append({"topic": topic, "metric": payload, "type": "performance"})
 
@@ -179,15 +180,15 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
         # Verify correct handlers processed their messages
         assert len(alerts_received) == 2
         assert len(metrics_received) == 1
-        assert alerts_received[0]["alert"] == "unauthorized_access"
-        assert metrics_received[0]["metric"] == "cpu_usage:85%"
+        assert alerts_received[0]["alert"] == b"unauthorized_access"
+        assert metrics_received[0]["metric"] == b"cpu_usage:85%"
 
     @pytest.mark.asyncio
     async def test_consumer_handler_with_external_service_calls(self, real_connected_connector):
         """Test: Consumer's handler makes external API calls with real MQTT"""
         api_calls_made = []
 
-        async def webhook_notifier_handler(topic: str, payload: str):
+        async def webhook_notifier_handler(topic: str, payload: bytes):
             """Consumer's handler that calls external webhook"""
             # Simulate external API call
             await asyncio.sleep(0.1)  # Network delay simulation
@@ -212,8 +213,8 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
 
         # Verify external API calls were made
         assert len(api_calls_made) == 2
-        assert api_calls_made[0]["payload_sent"] == "user_signup"
-        assert api_calls_made[1]["payload_sent"] == "payment_completed"
+        assert api_calls_made[0]["payload_sent"] == b"user_signup"
+        assert api_calls_made[1]["payload_sent"] == b"payment_completed"
 
     @pytest.mark.asyncio
     async def test_consumer_queue_overflow_scenario(self, real_connected_connector):
@@ -228,7 +229,7 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
 
         processed_messages = []
 
-        async def slow_handler(topic: str, payload: str):
+        async def slow_handler(topic: str, payload: bytes):
             """Slow handler to cause queue backup"""
             await asyncio.sleep(0.5)  # Slow processing
             processed_messages.append(payload)
@@ -254,7 +255,7 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
         processing_started = []
         processing_completed = []
 
-        async def long_running_handler(topic: str, payload: str):
+        async def long_running_handler(topic: str, payload: bytes):
             """Consumer's handler with longer processing time"""
             processing_started.append(payload)
             await asyncio.sleep(0.3)  # Simulate longer work
@@ -268,11 +269,10 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
         await real_connected_connector.publishAsync(test_topic, "task_1", qos=0)
         await real_connected_connector.publishAsync(test_topic, "task_2", qos=0)
 
-        # Allow processing to start
-        await asyncio.sleep(0.2)
-
-        # Verify processing completes before fixture teardown
-        await asyncio.sleep(0.5)
+        # Allow processing to start and complete
+        # Each task takes 0.3s, with 5 workers they can run concurrently
+        # But we need to account for message arrival and queue processing time
+        await asyncio.sleep(1.0)  # Increased from 0.7s to 1.0s
 
         # Verify in-flight processing completed
         assert len(processing_started) == 2
@@ -283,7 +283,7 @@ class TestOnMessageHandlerExecutorConsumerPerspective:
         """Test: Consumer monitors queue performance with real MQTT"""
         processing_delays = []
 
-        async def monitored_handler(topic: str, payload: str):
+        async def monitored_handler(topic: str, payload: bytes):
             """Consumer's handler that tracks processing delays"""
             await asyncio.sleep(0.1)
 

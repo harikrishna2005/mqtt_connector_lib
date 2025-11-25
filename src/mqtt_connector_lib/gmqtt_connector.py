@@ -8,6 +8,7 @@ from mqtt_connector_lib.container_mqtt import mqttContainer
 from mqtt_connector_lib.exceptions import MyMqttBaseError, MyMqttConnectionError, MyMqttSubscriptionError
 from mqtt_connector_lib.interfaces import HandlerFunc
 from mqtt_connector_lib.on_message_handler_executor import OnMessageHandlerExecutor
+from mqtt_connector_lib.smart_scaling_executor import SmartScalingExecutor
 
 import logging
 from mqtt_connector_lib import constants
@@ -78,7 +79,8 @@ class GMqttConnector:
         # self._user_friendly_handlers: dict[str, HandlerFunc] = {}  # consumer app accessibility
 
         # _on_message handler execution
-        self._on_message_handler_executor = OnMessageHandlerExecutor(max_workers=max_on_message_handler_workers)
+        # self._on_message_handler_executor = OnMessageHandlerExecutor(max_workers=max_on_message_handler_workers)
+        self._on_message_handler_executor = SmartScalingExecutor()
 
         logger.info(f"MQTT Client Initialied: {self.client_id}")
 
@@ -432,7 +434,8 @@ class GMqttConnector:
         handler = self._topic_handlers.get(topic, None)
         # handler(topic, payload)  # - Raw Payload
         # Execute handler asynchronously instead of direct call
-        self._on_message_handler_executor.execute_on_message_handler(topic, payload, handler)
+        # self._on_message_handler_executor.execute_on_message_handler(topic, payload, handler)
+        self._on_message_handler_executor.submit(topic, payload, handler)
 
 
     # def _store_in_memory_subscription(self, topic: str, handler: HandlerFunc, granted_qos: int):

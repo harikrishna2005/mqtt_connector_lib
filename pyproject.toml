@@ -19,6 +19,8 @@
 # step 2
 #Install dependencies and create/update the virtual environment:
 # #####poetry install    or   poetry install --extras test (with optional dependencies Ex: pytest)
+
+# step 3
 #Build the package:
 # #####poetry build
 
@@ -50,6 +52,7 @@ pytest = {version = "^7.4.0", optional = true}
 pytest-asyncio = {version = "^0.21.0", optional = true}
 pytest-cov = {version = "^4.1.0", optional = true}
 dependency-injector = "^4.48.2"
+psutil = "^5.9.0"
 
 [tool.poetry.extras]
 test = ["pytest", "pytest-asyncio", "pytest-cov"]

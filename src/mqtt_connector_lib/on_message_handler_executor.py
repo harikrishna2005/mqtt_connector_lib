@@ -15,7 +15,7 @@ logger = logging.LoggerAdapter(logger, adapter_context)
 class OnMessageHandlerExecutor:
     """Executes handlers from _on_message callback using async worker pool pattern"""
 
-    def __init__(self, max_workers: int = 5, queue_size: int = 1000, thread_workers: int = 3):
+    def __init__(self, max_workers: int = 5, queue_size: int = 1000): # , thread_workers: int = 3):
         self._on_message_handler_queue = asyncio.Queue(maxsize=queue_size)
         self._workers = []
         self._max_workers = max_workers

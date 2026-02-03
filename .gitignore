@@ -223,3 +223,26 @@ __marimo__/
 *.iml
 *.iws
 *.ipr
+
+
+#===========================NEWLY ADDED Based on Smart Executor Live Project ===========================
+# Auto-generated files
+metrics.csv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+

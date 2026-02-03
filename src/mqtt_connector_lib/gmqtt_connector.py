@@ -13,6 +13,8 @@ from mqtt_connector_lib.smart_scaling_executor import SmartScalingExecutor
 import logging
 from mqtt_connector_lib import constants
 
+
+
 adapter_context = {'prefix': constants.GMQTT_CONNECTOR_PREFIX}
 # logger = logging.LoggerAdapter(logging.getLogger(constants.SERVICE_NAME), adapter_context)
 logger = logging.getLogger(constants.SERVICE_NAME)
@@ -28,8 +30,25 @@ class BrokerClient:
         self.password = password
 
 
+# Metrics callback - can be configured externally
+_metrics_callback = None
 
+def set_metrics_callback(callback):
+    """
+    Set the global metrics callback for SmartScalingExecutor.
 
+    Usage:
+        from mqtt_connector_lib.gmqtt_connector import set_metrics_callback
+        from prometheus_metrics import prometheus_metrics_callback
+
+        set_metrics_callback(prometheus_metrics_callback)
+    """
+    global _metrics_callback
+    _metrics_callback = callback
+
+def get_metrics_callback():
+    """Get the configured metrics callback, or None if not set"""
+    return _metrics_callback
 
 class GMqttConnector:
     """
@@ -78,9 +97,12 @@ class GMqttConnector:
         self._handler_registry = mqttContainer.handler_registry()
         # self._user_friendly_handlers: dict[str, HandlerFunc] = {}  # consumer app accessibility
 
-        # _on_message handler execution
+        # _on_message handler execution - pass topic_handlers to executor
         # self._on_message_handler_executor = OnMessageHandlerExecutor(max_workers=max_on_message_handler_workers)
-        self._on_message_handler_executor = SmartScalingExecutor()
+        self._on_message_handler_executor = SmartScalingExecutor(
+            topic_handlers=self._topic_handlers,  # Pass reference to topic handlers
+            metrics_cb=get_metrics_callback()
+        )
 
         logger.info(f"MQTT Client Initialied: {self.client_id}")
 
@@ -430,12 +452,9 @@ class GMqttConnector:
         # logger.info(f"Subscription Acknowledged. Message ID: {mid}  Granted QoS levels :  {granted_qos}")
 
     def _on_message(self, client, topic, payload, qos, properties):
-        # logger.info(f"zzzzzzzzzzzzzzzzzzzz message receive in on_message callback  topic: {topic}   payload: {payload}   qos: {qos} ")
-        handler = self._topic_handlers.get(topic, None)
-        # handler(topic, payload)  # - Raw Payload
-        # Execute handler asynchronously instead of direct call
-        # self._on_message_handler_executor.execute_on_message_handler(topic, payload, handler)
-        self._on_message_handler_executor.submit(topic, payload, handler)
+        # Fast path - just queue the topic/payload, handler retrieved in worker loop
+        # This prevents blocking MQTT callback during handler lookup
+        self._on_message_handler_executor.submit(topic, payload)
 
 
     # def _store_in_memory_subscription(self, topic: str, handler: HandlerFunc, granted_qos: int):

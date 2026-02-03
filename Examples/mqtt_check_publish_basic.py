@@ -1,6 +1,11 @@
 from mqtt_connector_lib.exceptions import MyMqttConnectionError,MyMqttSubscriptionError
 from mqtt_connector_lib.gmqtt_connector import BrokerClient,GMqttConnector
 import asyncio
+
+from mqtt_connector_lib.gmqtt_connector import GMqttConnector, BrokerClient, set_metrics_callback
+from mqtt_connector_lib.prometheus_metrics import start_prometheus_server, create_combined_callback
+
+
 import logging
 from initsetup import setup_logging
 setup_logging()
@@ -74,6 +79,19 @@ test_client = live_mosquitto_broker
 
 async def main():
     logger.info("Starting the application")
+
+
+    #==== prometheus metrics setup ======
+    # 1. Start Prometheus server
+    await start_prometheus_server(port=8000)
+    # 2. Configure combined callback (Prometheus + Terminal Dashboard)
+    callback = create_combined_callback(enable_terminal_dashboard=True)
+    set_metrics_callback(callback)
+    # ================================
+
+
+
+
     mqtt_client_connector = GMqttConnector(broker_details=test_client)
     # await mqtt_client_connector.connectAsync(username="randomuser", password="randompassword")
     async def sample_handler(topic: str, payload: str):

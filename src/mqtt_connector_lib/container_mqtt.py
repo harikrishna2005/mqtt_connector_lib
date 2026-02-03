@@ -1,5 +1,5 @@
 from dependency_injector import containers, providers
-from src.mqtt_connector_lib.handler_registry import HandlerRegistry
+from mqtt_connector_lib.handler_registry import HandlerRegistry
 
 
 class MqttConnectorContainer(containers.DeclarativeContainer):

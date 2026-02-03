@@ -46,9 +46,16 @@ logger = logging.LoggerAdapter(logger, adapter_context)
 # root_logger.setLevel(logging.INFO)
 # root_logger.handlers.clear()
 # root_logger.addHandler(stream_handler)
+#
+# live_mosquitto_broker = BrokerClient(
+#     host="test.mosquitto.org",
+#     port=1883,
+#     # host="XXX.mosquitto.org",
+#     # port=1999,
+#     client_id="test_client_12345")
 
 live_mosquitto_broker = BrokerClient(
-    host="test.mosquitto.org",
+    host="broker.mqtt.cool",
     port=1883,
     # host="XXX.mosquitto.org",
     # port=1999,
@@ -65,8 +72,8 @@ aws_broker = BrokerClient(
     password="My_mqtt_password629@?")
 
 
-# test_client = live_mosquitto_broker
-test_client = aws_broker
+test_client = live_mosquitto_broker
+# test_client = aws_broker
 
 # connector = MqttClient(broker_details=test_client)
 

@@ -61,15 +61,6 @@ class SmartScalingExecutor:
       - Safe handling of sync or async handler functions
       - Graceful shutdown with timeout to avoid indefinite hangs
       - Portable: os.getloadavg() guarded for non-Unix systems
-
-      Aggressive scaling parameters
-                  SmartScalingExecutor(
-                min_workers=5,      # Current: conservative
-                max_workers=20,     # Current: conservative
-                ewma_alpha=0.3,     # Increase for faster response
-                queue_check_interval=1.0  # Decrease for faster scaling
-            )
-
     """
 
     # Queue usage thresholds (percent)
@@ -79,7 +70,6 @@ class SmartScalingExecutor:
 
     def __init__(
         self,
-        topic_handlers: dict,  # Dictionary mapping topics to handlers
         min_workers: int = 5,  # Increased from 3 to 5 for better baseline
         max_workers: int = 20,  # Decreased from 30 to 15 for cost efficiency
         ewma_alpha: float = 0.2,
@@ -88,7 +78,6 @@ class SmartScalingExecutor:
         shutdown_wait_seconds: float = 10.0,
         metrics_cb=None
     ):
-        self._topic_handlers = topic_handlers  # Store reference to handler dict
         self.min_workers = max(1, min_workers)
         self.max_workers = max(self.min_workers, max_workers)
         self.ewma_alpha = max(0.0, min(1.0, ewma_alpha))
@@ -102,7 +91,7 @@ class SmartScalingExecutor:
         # Monotonic worker id counter to avoid reusing IDs.
         self._next_worker_id = 0
 
-        # Async queue for incoming handlers (now stores only topic, payload)
+        # Async queue for incoming handlers
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
 
         # State flags
@@ -173,13 +162,13 @@ class SmartScalingExecutor:
         self.workers.clear()
         logger.info("SmartScalingExecutor stopped.")
 
-    def submit(self, topic: str, payload: Any) -> bool:
+    def submit(self, topic: str, payload: Any, handler: HandlerFunc) -> bool:
         """
-        Submit (topic, payload) tuple to the queue. Handler retrieved in worker loop.
+        Submit (topic,payload,handler) tuple to the queue.
         Returns True if queued successfully, False if queue is full (drop/overflow policy).
         """
         try:
-            self.queue.put_nowait((topic, payload))  # No handler - retrieved in worker
+            self.queue.put_nowait((topic, payload, handler))
             return True
         except asyncio.QueueFull:
             logger.error("Queue FULL → dropping incoming message.")
@@ -202,19 +191,12 @@ class SmartScalingExecutor:
         return worker_id
 
     async def _worker_loop(self, worker_id: int):
-        """Worker loop which retrieves handler from dict and supports both async and sync handlers."""
+        """Worker loop which supports both async and sync handlers."""
         name = f"worker-{worker_id}"
         try:
             while not self.shutdown_flag:
                 try:
-                    topic, payload = await self.queue.get()  # No handler in tuple
-
-                    # Retrieve handler HERE (inside worker loop)
-                    handler = self._topic_handlers.get(topic, None)
-                    if handler is None:
-                        logger.warning(f"{name}: No handler for topic '{topic}'")
-                        self.queue.task_done()
-                        continue
+                    topic, payload, handler = await self.queue.get()
 
                     try:
                         # Support both coroutine (async) and normal functions

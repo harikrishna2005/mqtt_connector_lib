@@ -124,7 +124,7 @@ class HandlerRegistry(IHandlerRegistry):
                     reason_code="duplicate_handler_function", **self.error_details)
             else:
                 logger.warning(
-                    f"Handler function '{getattr(handler_func, 'name', 'unknown')}' is already registered with ID '{existing_handler_id}'. "
+                    f"Handler function '{getattr(handler_func, '__name__', 'unknown')}' is already registered with ID '{existing_handler_id}'. "
                     f"Skipping duplicate registration and returning existing ID.")
                 return existing_handler_id
 

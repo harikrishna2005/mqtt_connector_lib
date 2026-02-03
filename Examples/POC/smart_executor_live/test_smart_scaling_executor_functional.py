@@ -14,8 +14,13 @@ Run with: pytest test_smart_scaling_executor_functional.py -v
 import asyncio
 import pytest
 import time
+import sys
+from pathlib import Path
 
-from mqtt_connector_lib.smart_scaling_executor import SmartScalingExecutor
+# Add the current directory to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from smart_scaling_executor import SmartScalingExecutor
 
 
 # ============================================================================
@@ -25,12 +30,9 @@ from mqtt_connector_lib.smart_scaling_executor import SmartScalingExecutor
 @pytest.fixture
 def executor():
     """Create a basic executor for testing"""
-    # Mock topic_handlers dict for testing
-    topic_handlers = {}
     return SmartScalingExecutor(
-        topic_handlers=topic_handlers,  # Pass handlers dict
         min_workers=3,
-        max_workers=10,  # Reduced for testing (POC default is 15)
+        max_workers=10,
         queue_check_interval=1.0,  # Faster for testing
         queue_size=1000
     )
@@ -85,10 +87,7 @@ class TestBasicFunctionality:
     @pytest.mark.asyncio
     async def test_submit_to_queue(self, started_executor):
         """Verify messages can be submitted to queue"""
-        # Register handler in topic_handlers dict
-        started_executor._topic_handlers["test/topic"] = dummy_handler
-
-        success = started_executor.submit("test/topic", "test_payload")
+        success = started_executor.submit("test/topic", "test_payload", dummy_handler)
 
         assert success, "Submit should return True when queue not full"
         assert started_executor.get_queue_size() > 0, "Queue should contain the message"
@@ -104,10 +103,7 @@ class TestBasicFunctionality:
         message_count = 50
 
         for i in range(message_count):
-            topic = f"topic/{i}"
-            # Register handler for each topic
-            started_executor._topic_handlers[topic] = dummy_handler
-            success = started_executor.submit(topic, f"payload_{i}")
+            success = started_executor.submit(f"topic/{i}", f"payload_{i}", dummy_handler)
             assert success, f"Message {i} should be accepted"
 
         # Wait for all messages to be processed
@@ -137,9 +133,7 @@ class TestScaleUp:
         # Submit burst of messages (300 messages with slow handler)
         burst_size = 300
         for i in range(burst_size):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         # Wait for autoscaler to react (2-3 check intervals)
         await asyncio.sleep(3.5)
@@ -154,7 +148,6 @@ class TestScaleUp:
         assert 4 <= current_workers <= 10, \
             f"Worker count {current_workers} should be in reasonable range [4-10] for burst load"
 
-    @pytest.mark.skip(reason="Conservative scaling: Expects ≥6 workers, gets 4 (acceptable)")
     @pytest.mark.asyncio
     async def test_scales_up_to_max_workers(self, started_executor):
         """
@@ -163,9 +156,7 @@ class TestScaleUp:
         # Submit massive burst that would require more than max_workers
         burst_size = 800
         for i in range(burst_size):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         # Wait for autoscaler to react multiple times
         await asyncio.sleep(6.0)
@@ -187,18 +178,14 @@ class TestScaleUp:
         """
         # Submit messages to trigger initial scale-up
         for i in range(100):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         await asyncio.sleep(2.0)
         workers_after_first_scale = len(started_executor.workers)
 
         # Submit more immediately (should be in cooldown)
         for i in range(100, 200):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         # Check immediately (within cooldown period)
         await asyncio.sleep(1.0)
@@ -216,9 +203,7 @@ class TestScaleUp:
         # Simulate steady low load (50 fast messages)
         for _ in range(3):  # 3 rounds of steady load
             for i in range(50):
-                topic = f"topic/{i}"
-                started_executor._topic_handlers[topic] = dummy_handler
-                started_executor.submit(topic, f"payload_{i}")
+                started_executor.submit(f"topic/{i}", f"payload_{i}", dummy_handler)
             await asyncio.sleep(2.0)
 
         # Workers should stay near minimum (3-5 range)
@@ -234,7 +219,6 @@ class TestScaleUp:
 class TestScaleDown:
     """Test worker scaling down when load decreases"""
 
-    @pytest.mark.skip(reason="Conservative scaling: No scale-up happens to test scale-down")
     @pytest.mark.asyncio
     async def test_scales_down_when_idle(self, started_executor):
         """
@@ -244,9 +228,7 @@ class TestScaleDown:
         # First, scale up by submitting burst
         burst_size = 200
         for i in range(burst_size):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         await asyncio.sleep(3.0)
         peak_workers = len(started_executor.workers)
@@ -265,7 +247,6 @@ class TestScaleDown:
         assert final_workers <= 6, \
             f"After idle period, workers should be ≤6, got {final_workers}"
 
-    @pytest.mark.skip(reason="Conservative scaling: No scale-up happens to test scale-down")
     @pytest.mark.asyncio
     async def test_scales_down_to_min_workers(self, started_executor):
         """
@@ -273,9 +254,7 @@ class TestScaleDown:
         """
         # Scale up first
         for i in range(150):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         await asyncio.sleep(3.0)
         assert len(started_executor.workers) > 3, "Should scale up initially"
@@ -289,7 +268,6 @@ class TestScaleDown:
         assert final_workers >= 3, f"Should not go below min_workers (3), got {final_workers}"
         assert final_workers <= 5, f"Should return near minimum after extended idle, got {final_workers}"
 
-    @pytest.mark.skip(reason="Conservative scaling: Fast messages don't trigger scale-up")
     @pytest.mark.asyncio
     async def test_rapid_scale_down_on_empty_queue(self, started_executor):
         """
@@ -297,9 +275,7 @@ class TestScaleDown:
         """
         # Scale up
         for i in range(100):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = dummy_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", dummy_handler)
 
         await asyncio.sleep(2.0)
         workers_after_scale_up = len(started_executor.workers)
@@ -329,15 +305,12 @@ class TestQueueManagement:
         """Verify submit returns False when queue is full"""
         # Fill the queue (max 1000)
         for i in range(1000):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            success = started_executor.submit(topic, f"payload_{i}")
+            success = started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
             if not success:
                 break
 
         # Next submit should fail
-        started_executor._topic_handlers["overflow/topic"] = slow_handler
-        success = started_executor.submit("overflow/topic", "overflow")
+        success = started_executor.submit("overflow/topic", "overflow", slow_handler)
 
         # Should return False when full OR queue should be near capacity
         if not success:
@@ -352,9 +325,7 @@ class TestQueueManagement:
         submitted = 0
 
         for i in range(message_count):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = dummy_handler
-            success = started_executor.submit(topic, f"payload_{i}")
+            success = started_executor.submit(f"topic/{i}", f"payload_{i}", dummy_handler)
             if success:
                 submitted += 1
 
@@ -384,9 +355,7 @@ class TestScalingThresholds:
         """
         # Small burst (30 fast messages)
         for i in range(30):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = dummy_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", dummy_handler)
 
         await asyncio.sleep(3.0)
 
@@ -396,7 +365,6 @@ class TestScalingThresholds:
         assert 3 <= workers <= 5, \
             f"Small burst should keep workers at 3-5, got {workers}"
 
-    @pytest.mark.skip(reason="Conservative scaling: Expects 4-8 workers, gets 3 (acceptable)")
     @pytest.mark.asyncio
     async def test_medium_burst_moderate_scaling(self, started_executor):
         """
@@ -404,9 +372,7 @@ class TestScalingThresholds:
         """
         # Medium burst (150 messages)
         for i in range(150):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         await asyncio.sleep(4.0)
 
@@ -416,7 +382,6 @@ class TestScalingThresholds:
         assert 4 <= workers <= 8, \
             f"Medium burst should scale to 4-8 workers, got {workers}"
 
-    @pytest.mark.skip(reason="Conservative scaling: Expects 6-10 workers, gets 4 (acceptable)")
     @pytest.mark.asyncio
     async def test_large_burst_aggressive_scaling(self, started_executor):
         """
@@ -424,9 +389,7 @@ class TestScalingThresholds:
         """
         # Large burst (500 messages)
         for i in range(500):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", slow_handler)
 
         await asyncio.sleep(5.0)
 
@@ -479,9 +442,7 @@ class TestMetricsTracking:
 
         # Submit and process messages
         for i in range(20):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = dummy_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", dummy_handler)
 
         await asyncio.sleep(2.0)
 
@@ -512,9 +473,7 @@ class TestRegressionProtection:
         for round_num in range(5):
             # Burst
             for i in range(100):
-                topic = f"topic/{round_num}/{i}"
-                started_executor._topic_handlers[topic] = slow_handler
-                started_executor.submit(topic, "payload")
+                started_executor.submit(f"topic/{round_num}/{i}", "payload", slow_handler)
             await asyncio.sleep(2.0)
 
             # Check bounds
@@ -522,7 +481,6 @@ class TestRegressionProtection:
             assert 3 <= workers <= 10, \
                 f"Round {round_num}: Workers {workers} must be within [3, 10]"
 
-    @pytest.mark.skip(reason="Conservative scaling: Expects ≥2 worker increase, gets 1 (acceptable)")
     @pytest.mark.asyncio
     async def test_scaling_responsiveness(self, started_executor):
         """
@@ -530,9 +488,7 @@ class TestRegressionProtection:
         """
         # Submit large burst
         for i in range(300):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, "payload")
+            started_executor.submit(f"topic/{i}", "payload", slow_handler)
 
         initial_workers = len(started_executor.workers)
 
@@ -546,7 +502,6 @@ class TestRegressionProtection:
         assert scaled_workers - initial_workers >= 2, \
             f"Should scale up by at least 2 workers, scaled by {scaled_workers - initial_workers}"
 
-    @pytest.mark.skip(reason="Conservative scaling: No scale-up happens to test scale-down responsiveness")
     @pytest.mark.asyncio
     async def test_scale_down_responsiveness(self, started_executor):
         """
@@ -554,9 +509,7 @@ class TestRegressionProtection:
         """
         # Scale up first
         for i in range(200):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = slow_handler
-            started_executor.submit(topic, "payload")
+            started_executor.submit(f"topic/{i}", "payload", slow_handler)
 
         await asyncio.sleep(3.0)
         peak_workers = len(started_executor.workers)
@@ -581,9 +534,7 @@ class TestRegressionProtection:
         start_time = time.time()
 
         for i in range(message_count):
-            topic = f"topic/{i}"
-            started_executor._topic_handlers[topic] = dummy_handler
-            started_executor.submit(topic, f"payload_{i}")
+            started_executor.submit(f"topic/{i}", f"payload_{i}", dummy_handler)
 
         # Wait for processing
         await asyncio.sleep(5.0)
@@ -602,10 +553,10 @@ class TestRegressionProtection:
                 f"Processing rate should be >10 msg/sec, got {rate:.1f} msg/sec"
 
 
-# # ============================================================================
-# # Run Tests
-# # ============================================================================
-#
-# if __name__ == "__main__":
-#     pytest.main([__file__, "-v", "-s"])
-#
+# ============================================================================
+# Run Tests
+# ============================================================================
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s"])
+

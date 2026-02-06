@@ -4,8 +4,16 @@ from datetime import datetime
 from typing import Optional
 import redis.asyncio as redis
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
+import logging
+from mqtt_connector_lib import constants
 
+
+
+adapter_context = {'prefix': constants.GMQTT_CONNECTOR_PREFIX}
+# logger = logging.LoggerAdapter(logging.getLogger(constants.SERVICE_NAME), adapter_context)
+logger = logging.getLogger(constants.SERVICE_NAME)
+logger = logging.LoggerAdapter(logger, adapter_context)
 
 class RedisConnector:
     def __init__(

@@ -47,7 +47,6 @@ class RedisConnector:
             socket_timeout=5,  # Increased for high-load scenarios
             socket_keepalive=True,  # Keep connections alive
             socket_keepalive_options={},
-            retry_on_timeout=True,  # Retry on timeout
             max_connections=50  # Increase connection pool size
         )
 
